@@ -101,6 +101,48 @@ canvas.addEventListener("mouseleave", () => {
   gaze.active = false;
 });
 
+// 左键按下：如果点在角色范围内，则拖动窗口（桌宠常用交互）
+canvas.addEventListener("mousedown", (e) => {
+  if (e.button !== 0) return;
+  // 没有 SpineCanvas 实例时无法做 worldToScreen 命中，这里用最小可用策略：
+  // 若还未初始化 skeleton，则不处理；初始化后会在首次 render 后用 sp 挂载到 window
+  const w = window as any;
+  const sp = w.__spineCanvas as SpineCanvas | undefined;
+  if (!sp) return;
+  const p = canvasPointToPixels(e);
+  if (isPointerOnSkeleton(sp, p.x, p.y)) void tryStartWindowDrag();
+});
+
+// ---- 桌宠拖拽：只有点到“角色本体范围”才允许拖动窗口 ----
+// 通过 skeleton.getBoundsRect() -> camera.worldToScreen() 做一个近似命中测试。
+async function tryStartWindowDrag() {
+  // 仅在 Tauri 环境可用；浏览器里直接跳过
+  const w = window as any;
+  const win = w.__TAURI__?.window?.getCurrentWindow?.();
+  if (!win?.startDragging) return;
+  try {
+    await win.startDragging();
+  } catch {
+    // ignore: 某些平台/窗口状态下可能不允许拖拽
+  }
+}
+
+function isPointerOnSkeleton(sp: SpineCanvas, px: number, pyFromTop: number): boolean {
+  if (!skeleton) return false;
+  const b = skeleton.getBoundsRect();
+  // 世界 AABB 四角 -> 屏幕（注意：camera.worldToScreen 的 y 原点在底部）
+  const cam = sp.renderer.camera;
+  const p1 = cam.worldToScreen(new Vector3(b.x, b.y, 0), canvas.width, canvas.height);
+  const p2 = cam.worldToScreen(new Vector3(b.x + b.width, b.y + b.height, 0), canvas.width, canvas.height);
+  const left = Math.min(p1.x, p2.x);
+  const right = Math.max(p1.x, p2.x);
+  const bottom = Math.min(p1.y, p2.y);
+  const top = Math.max(p1.y, p2.y);
+  const pyFromBottom = canvas.height - pyFromTop;
+  const pad = 8; // 给一点容错边
+  return px >= left - pad && px <= right + pad && pyFromBottom >= bottom - pad && pyFromBottom <= top + pad;
+}
+
 /** 与 Python 版一致：用初始姿势的包围盒定机位，不在每帧跟 getBoundsRect() 漂移。 */
 let stableMidX = 0;
 let stableMidY = 0;
@@ -137,6 +179,9 @@ new SpineCanvas(canvas, {
       sp.assetManager.loadJson(SKEL);
     },
     initialize(sp) {
+      // 方便拖拽命中测试：让外层事件拿到 SpineCanvas 实例
+      (window as any).__spineCanvas = sp;
+
       const atlas = sp.assetManager.require(ATLAS);
       const jsonRaw = sp.assetManager.require(SKEL);
       const skelJson = new SkeletonJson(new AtlasAttachmentLoader(atlas));
@@ -284,7 +329,8 @@ new SpineCanvas(canvas, {
       skeleton.updateWorldTransform(Physics.update);
     },
     render(sp) {
-      sp.clear(0.09, 0.1, 0.12, 1);
+      // 桌宠透明背景：clear alpha=0
+      sp.clear(0, 0, 0, 0);
       if (!skeleton) return;
       sp.renderer.resize(ResizeMode.Expand);
       fitCamera(sp);
