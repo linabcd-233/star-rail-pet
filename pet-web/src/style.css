@@ -41,23 +41,31 @@ body {
 }
 
 #pomo-panel {
+  /* 由 main.ts syncPomoPanelWidthFromButtons 写入，与三按钮行同宽 */
+  --pomo-btn-row-px: 0px;
   position: absolute;
   left: 0;
-  bottom: 0;
+  top: 0;
+  bottom: auto;
   z-index: 10;
   /* 叠在 Spine 画布（银枝）之上，整块区域可接收指针（Tauri 穿透由 main.ts 矩形命中配合） */
   pointer-events: auto;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  box-sizing: border-box;
+  max-width: min(92vw, 280px);
   padding: 8px 10px;
   border-radius: 8px;
   background: rgba(20, 18, 28, 0.72);
   color: #eee;
   font: 12px/1.35 system-ui, sans-serif;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
-  max-width: min(220px, 92vw);
 }
 
 .pomo-drag-handle {
   cursor: grab;
+  align-self: stretch;
   height: 12px;
   margin: -4px -6px 6px -6px;
   border-radius: 6px;
@@ -73,11 +81,16 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
+  align-self: center;
+  box-sizing: border-box;
+  width: var(--pomo-btn-row-px);
+  min-width: 0;
 }
 
 input.pomo-time {
+  box-sizing: border-box;
   width: 100%;
-  max-width: 7.5em;
+  min-width: 0;
   margin: 0;
   padding: 4px 6px;
   border-radius: 6px;
@@ -101,8 +114,13 @@ input.pomo-time:read-only {
 
 .pomo-btns {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  justify-content: center;
+  align-items: center;
   gap: 6px;
+  align-self: center;
+  box-sizing: border-box;
+  width: max-content;
 }
 
 #pomo-panel button {
@@ -121,12 +139,25 @@ input.pomo-time:read-only {
   border-color: rgba(255, 210, 218, 0.42);
 }
 
+#pomo-panel button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+#pomo-panel button:disabled:hover {
+  background: rgba(130, 42, 58, 0.48);
+  border-color: rgba(255, 190, 200, 0.32);
+}
+
 #speech-bubble {
   position: absolute;
-  left: 50%;
-  bottom: 120px;
-  transform: translateX(-50%);
-  z-index: 9;
+  left: 0;
+  top: 0;
+  bottom: auto;
+  right: auto;
+  /* left/top/transform 由 main.ts layoutSpeechBubble 按头部骨骼与番茄钟避让动态设置 */
+  transform: translateY(-50%);
+  z-index: 11;
   max-width: min(320px, 88vw);
   padding: 10px 14px;
   border-radius: 12px;

@@ -16,17 +16,17 @@ const IDLE_ANIM = "idel";
 const TALK_ANIM = "emoji_5";
 
 const POMO_START_LINES = [
-  "专注，亦是在践行纯美。",
-  "纯美骑士向你致意，勤奋的生灵。",
-  "试炼开始，愿伊德莉拉庇佑你。",
+  "专注，亦是在践行纯美",
+  "纯美骑士向你致意，勤奋的生灵",
+  "试炼开始，愿伊德莉拉庇佑你",
 ];
 const POMO_END_LINES = [
   "多么纯美的壮举！",
-  "休息片刻吧，我的挚友。",
-  "信念，无可摧毁。你做到了。",
+  "休息片刻吧，我的挚友",
+  "信念，无可摧毁！你做到了",
 ];
-const POMO_PAUSE_LINE = "修行之路上也需要调整。";
-const POMO_RESUME_LINE = "继续前行，纯美永不缺席。";
+const POMO_PAUSE_LINE = "修行之路上也需要调整";
+const POMO_RESUME_LINE = "继续前行，纯美永不缺席";
 
 function animFromQuery(): string {
   const q = new URLSearchParams(window.location.search).get("anim");
@@ -44,7 +44,6 @@ root.innerHTML = `
     <div class="pomo-row pomo-btns">
       <button type="button" id="pomo-start">开始</button>
       <button type="button" id="pomo-pause">暂停</button>
-      <button type="button" id="pomo-resume">继续</button>
       <button type="button" id="pomo-reset">重置</button>
     </div>
   </div>
@@ -57,6 +56,13 @@ const pomoPanel = document.querySelector<HTMLDivElement>("#pomo-panel")!;
 const pomoTimeEl = document.querySelector<HTMLInputElement>("#pomo-time")!;
 const speechBubbleEl = document.querySelector<HTMLDivElement>("#speech-bubble")!;
 const POMO_PANEL_MARGIN = 0;
+
+/** 头部附近骨骼（优先更靠上的「身体4」），用于对话气泡锚在脸侧 */
+const SPEECH_ANCHOR_BONES = ["身体4", "左看右看"] as const;
+const SPEECH_FACE_OFFSET_X = 36;
+/** 对话气泡竖直微调（相对头部锚点；正数偏下，负数偏上） */
+const SPEECH_FACE_OFFSET_Y = 40;
+const SPEECH_POMO_GAP = 8;
 
 let pomoPanelDrag:
   | null
@@ -84,6 +90,15 @@ function clampPomoPanelPosition() {
 function isClientPointOverPomoPanel(clientX: number, clientY: number) {
   const pr = pomoPanel.getBoundingClientRect();
   return clientX >= pr.left && clientX <= pr.right && clientY >= pr.top && clientY <= pr.bottom;
+}
+
+/** 第一行时间与面板宽度按三按钮行总宽收缩（CSS 单独做不到「子项定父宽」）。 */
+function syncPomoPanelWidthFromButtons() {
+  const row = pomoPanel.querySelector<HTMLDivElement>(".pomo-btns");
+  if (!row) return;
+  const w = row.offsetWidth;
+  if (w < 1) return;
+  pomoPanel.style.setProperty("--pomo-btn-row-px", `${w}px`);
 }
 
 function setupPomoPanelDrag() {
@@ -196,6 +211,15 @@ function syncIdlePomoFromInput() {
 function updatePomoTimeDisplay() {
   pomoTimeEl.value = formatMmSs(pomoRemainingMs);
   pomoTimeEl.readOnly = pomoPhase !== "idle" || isSpeechLocked();
+  const startBtn = document.querySelector<HTMLButtonElement>("#pomo-start");
+  const pauseBtn = document.querySelector<HTMLButtonElement>("#pomo-pause");
+  if (startBtn && pauseBtn) {
+    const locked = isSpeechLocked();
+    startBtn.textContent = pomoPhase === "paused" ? "继续" : "开始";
+    startBtn.disabled = pomoPhase === "running" || locked;
+    pauseBtn.disabled = pomoPhase !== "running" || locked;
+  }
+  syncPomoPanelWidthFromButtons();
 }
 
 function showSpeechBubble(text: string) {
@@ -206,6 +230,89 @@ function showSpeechBubble(text: string) {
 function hideSpeechBubble() {
   speechBubbleEl.textContent = "";
   speechBubbleEl.hidden = true;
+}
+
+function rectsOverlap2D(
+  ax: number,
+  ay: number,
+  aw: number,
+  ah: number,
+  bx: number,
+  by: number,
+  bw: number,
+  bh: number
+) {
+  return !(ax + aw <= bx || bx + bw <= ax || ay + ah <= by || by + bh <= ay);
+}
+
+/** 将气泡锚在头部骨骼右侧（屏幕坐标）；与番茄钟重叠时先右移，仍重叠则移到面板下缘以下。 */
+function layoutSpeechBubble(sp: SpineCanvas) {
+  if (!skeleton || speechBubbleEl.hidden) return;
+  fitCamera(sp);
+  let bone = null as ReturnType<Skeleton["findBone"]>;
+  for (const name of SPEECH_ANCHOR_BONES) {
+    bone = skeleton.findBone(name);
+    if (bone) break;
+  }
+  if (!bone) return;
+
+  const cam = sp.renderer.camera;
+  const v = new Vector3(bone.worldX, bone.worldY, 0);
+  cam.worldToScreen(v, canvas.width, canvas.height);
+
+  const cr = canvas.getBoundingClientRect();
+  const rr = root.getBoundingClientRect();
+  const pr = pomoPanel.getBoundingClientRect();
+
+  const anchorX = cr.left + (v.x / canvas.width) * cr.width;
+  const anchorY = cr.top + (v.y / canvas.height) * cr.height;
+
+  const pomoLeft = pr.left - rr.left;
+  const pomoTop = pr.top - rr.top;
+  const pomoW = pr.width;
+  const pomoH = pr.height;
+
+  let left = anchorX - rr.left + SPEECH_FACE_OFFSET_X;
+  let top = anchorY - rr.top + SPEECH_FACE_OFFSET_Y;
+
+  speechBubbleEl.style.left = `${left}px`;
+  speechBubbleEl.style.top = `${top}px`;
+  speechBubbleEl.style.bottom = "auto";
+  speechBubbleEl.style.right = "auto";
+  speechBubbleEl.style.transform = "translateY(-50%)";
+
+  let bw = speechBubbleEl.offsetWidth;
+  let bh = speechBubbleEl.offsetHeight;
+  if (bw < 1 || bh < 1) return;
+
+  const bubbleTop = (tc: number) => tc - bh / 2;
+
+  function overlapsPomo(l: number, tc: number) {
+    return rectsOverlap2D(l, bubbleTop(tc), bw, bh, pomoLeft, pomoTop, pomoW, pomoH);
+  }
+
+  if (overlapsPomo(left, top)) {
+    let tryLeft = left;
+    for (let i = 0; i < 48 && overlapsPomo(tryLeft, top); i++) {
+      tryLeft += 8;
+    }
+    if (!overlapsPomo(tryLeft, top)) {
+      left = tryLeft;
+    } else {
+      left = pomoLeft + pomoW + SPEECH_POMO_GAP;
+      if (overlapsPomo(left, top)) {
+        top = pomoTop + pomoH + SPEECH_POMO_GAP + bh / 2 + SPEECH_FACE_OFFSET_Y;
+        left = anchorX - rr.left + SPEECH_FACE_OFFSET_X;
+        bw = speechBubbleEl.offsetWidth;
+        bh = speechBubbleEl.offsetHeight;
+      }
+    }
+  }
+
+  left = clamp(left, 0, Math.max(0, rr.width - bw));
+  const topCenter = clamp(top, bh / 2, Math.max(bh / 2, rr.height - bh / 2));
+  speechBubbleEl.style.left = `${left}px`;
+  speechBubbleEl.style.top = `${topCenter}px`;
 }
 
 function beginSpeech(text: string, durationMs: number, after?: () => void) {
@@ -553,23 +660,25 @@ new SpineCanvas(canvas, {
       pomoTimeEl.addEventListener("change", () => syncIdlePomoFromInput());
       pomoTimeEl.addEventListener("blur", () => syncIdlePomoFromInput());
       document.querySelector("#pomo-start")!.addEventListener("click", () => {
-        if (pomoPhase !== "idle" || isSpeechLocked()) return;
-        const ms = parseMmSsToMs(pomoTimeEl.value) ?? pomoDefaultDurationMs;
-        pomoDefaultDurationMs = ms;
-        pomoRemainingMs = ms;
-        pomoPhase = "running";
-        updatePomoTimeDisplay();
-        beginSpeech(pickLine(POMO_START_LINES), 2800);
+        if (isSpeechLocked()) return;
+        if (pomoPhase === "idle") {
+          const ms = parseMmSsToMs(pomoTimeEl.value) ?? pomoDefaultDurationMs;
+          pomoDefaultDurationMs = ms;
+          pomoRemainingMs = ms;
+          pomoPhase = "running";
+          updatePomoTimeDisplay();
+          beginSpeech(pickLine(POMO_START_LINES), 2800);
+        } else if (pomoPhase === "paused") {
+          pomoPhase = "running";
+          updatePomoTimeDisplay();
+          beginSpeech(POMO_RESUME_LINE, 2200);
+        }
       });
       document.querySelector("#pomo-pause")!.addEventListener("click", () => {
         if (pomoPhase !== "running" || isSpeechLocked()) return;
         pomoPhase = "paused";
+        updatePomoTimeDisplay();
         beginSpeech(POMO_PAUSE_LINE, 2200);
-      });
-      document.querySelector("#pomo-resume")!.addEventListener("click", () => {
-        if (pomoPhase !== "paused" || isSpeechLocked()) return;
-        pomoPhase = "running";
-        beginSpeech(POMO_RESUME_LINE, 2200);
       });
       document.querySelector("#pomo-reset")!.addEventListener("click", () => {
         pomoPhase = "idle";
@@ -612,6 +721,7 @@ new SpineCanvas(canvas, {
         fn?.();
         if (cycleMode && startIdleRef) startIdleRef();
         else animState.setAnimation(0, animName, true);
+        updatePomoTimeDisplay();
       }
 
       const tick = (sp as any).__cycleTick as undefined | ((d: number) => void);
@@ -664,6 +774,8 @@ new SpineCanvas(canvas, {
       }
 
       skeleton.updateWorldTransform(Physics.update);
+
+      layoutSpeechBubble(sp);
     },
     render(sp) {
       sp.clear(0, 0, 0, 0);
@@ -681,9 +793,16 @@ new SpineCanvas(canvas, {
 });
 
 setupPomoPanelDrag();
+requestAnimationFrame(() => {
+  syncPomoPanelWidthFromButtons();
+  requestAnimationFrame(() => syncPomoPanelWidthFromButtons());
+});
 
 window.addEventListener("resize", () => {
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
   clampPomoPanelPosition();
+  syncPomoPanelWidthFromButtons();
+  const sp = (window as any).__spineCanvas as SpineCanvas | undefined;
+  if (sp) layoutSpeechBubble(sp);
 });
