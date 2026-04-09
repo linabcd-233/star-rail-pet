@@ -13,6 +13,20 @@ import { cursorPosition, getCurrentWindow, LogicalSize } from "@tauri-apps/api/w
 const SKEL = "1302.1a88ff13.json";
 const ATLAS = "1302.atlas";
 const IDLE_ANIM = "idel";
+const TALK_ANIM = "emoji_5";
+
+const POMO_START_LINES = [
+  "专注，亦是在践行纯美。",
+  "纯美骑士向你致意，勤奋的生灵。",
+  "试炼开始，愿伊德莉拉庇佑你。",
+];
+const POMO_END_LINES = [
+  "多么纯美的壮举！",
+  "休息片刻吧，我的挚友。",
+  "信念，无可摧毁。你做到了。",
+];
+const POMO_PAUSE_LINE = "修行之路上也需要调整。";
+const POMO_RESUME_LINE = "继续前行，纯美永不缺席。";
 
 function animFromQuery(): string {
   const q = new URLSearchParams(window.location.search).get("anim");
@@ -22,10 +36,104 @@ function animFromQuery(): string {
 const root = document.querySelector<HTMLDivElement>("#app")!;
 root.innerHTML = `
   <canvas id="skeleton" tabindex="-1"></canvas>
+  <div id="pomo-panel">
+    <div class="pomo-drag-handle" title="拖动面板"></div>
+    <div class="pomo-row pomo-main-row">
+      <input type="text" id="pomo-time" class="pomo-time" value="25:00" spellcheck="false" autocomplete="off" aria-label="专注时长 分:秒" />
+    </div>
+    <div class="pomo-row pomo-btns">
+      <button type="button" id="pomo-start">开始</button>
+      <button type="button" id="pomo-pause">暂停</button>
+      <button type="button" id="pomo-resume">继续</button>
+      <button type="button" id="pomo-reset">重置</button>
+    </div>
+  </div>
+  <div id="speech-bubble" aria-live="polite" hidden></div>
   <p id="status">加载中…</p>
 `;
 const canvas = document.querySelector<HTMLCanvasElement>("#skeleton")!;
 const statusEl = document.querySelector<HTMLParagraphElement>("#status")!;
+const pomoPanel = document.querySelector<HTMLDivElement>("#pomo-panel")!;
+const pomoTimeEl = document.querySelector<HTMLInputElement>("#pomo-time")!;
+const speechBubbleEl = document.querySelector<HTMLDivElement>("#speech-bubble")!;
+const POMO_PANEL_MARGIN = 0;
+
+let pomoPanelDrag:
+  | null
+  | {
+      pointerId: number;
+      offsetX: number;
+      offsetY: number;
+    } = null;
+
+function clampPomoPanelPosition() {
+  const rr = root.getBoundingClientRect();
+  const pr = pomoPanel.getBoundingClientRect();
+  let left = pr.left - rr.left;
+  let top = pr.top - rr.top;
+  const w = pr.width;
+  const h = pr.height;
+  left = clamp(left, POMO_PANEL_MARGIN, Math.max(POMO_PANEL_MARGIN, rr.width - w - POMO_PANEL_MARGIN));
+  top = clamp(top, POMO_PANEL_MARGIN, Math.max(POMO_PANEL_MARGIN, rr.height - h - POMO_PANEL_MARGIN));
+  pomoPanel.style.left = `${left}px`;
+  pomoPanel.style.top = `${top}px`;
+  pomoPanel.style.bottom = "auto";
+}
+
+/** 番茄钟整块面板（含圆角矩形区域）在窗口坐标系下的命中，用于 Tauri 穿透与拖窗口区分。 */
+function isClientPointOverPomoPanel(clientX: number, clientY: number) {
+  const pr = pomoPanel.getBoundingClientRect();
+  return clientX >= pr.left && clientX <= pr.right && clientY >= pr.top && clientY <= pr.bottom;
+}
+
+function setupPomoPanelDrag() {
+  const handle = pomoPanel.querySelector<HTMLDivElement>(".pomo-drag-handle")!;
+  const onMove = (e: PointerEvent) => {
+    if (!pomoPanelDrag || e.pointerId !== pomoPanelDrag.pointerId) return;
+    const rr = root.getBoundingClientRect();
+    const pr = pomoPanel.getBoundingClientRect();
+    let left = e.clientX - rr.left - pomoPanelDrag.offsetX;
+    let top = e.clientY - rr.top - pomoPanelDrag.offsetY;
+    const w = pr.width;
+    const h = pr.height;
+    left = clamp(left, POMO_PANEL_MARGIN, Math.max(POMO_PANEL_MARGIN, rr.width - w - POMO_PANEL_MARGIN));
+    top = clamp(top, POMO_PANEL_MARGIN, Math.max(POMO_PANEL_MARGIN, rr.height - h - POMO_PANEL_MARGIN));
+    pomoPanel.style.left = `${left}px`;
+    pomoPanel.style.top = `${top}px`;
+    pomoPanel.style.bottom = "auto";
+  };
+  const onUp = (e: PointerEvent) => {
+    if (!pomoPanelDrag || e.pointerId !== pomoPanelDrag.pointerId) return;
+    pomoPanelDrag = null;
+    handle.releasePointerCapture(e.pointerId);
+    document.removeEventListener("pointermove", onMove);
+    document.removeEventListener("pointerup", onUp);
+    document.removeEventListener("pointercancel", onUp);
+  };
+  handle.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const pr = pomoPanel.getBoundingClientRect();
+    pomoPanelDrag = {
+      pointerId: e.pointerId,
+      offsetX: e.clientX - pr.left,
+      offsetY: e.clientY - pr.top,
+    };
+    if (pomoPanel.style.bottom && pomoPanel.style.bottom !== "auto") {
+      const rr = root.getBoundingClientRect();
+      pomoPanel.style.top = `${pr.top - rr.top}px`;
+      pomoPanel.style.bottom = "auto";
+    }
+    if (!pomoPanel.style.left) {
+      const rr = root.getBoundingClientRect();
+      pomoPanel.style.left = `${pr.left - rr.left}px`;
+    }
+    handle.setPointerCapture(e.pointerId);
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
+    document.addEventListener("pointercancel", onUp);
+  });
+}
 const isTauri =
   !!(window as any).__TAURI_INTERNALS__ ||
   !!(window as any).__TAURI__;
@@ -38,6 +146,76 @@ let animState: AnimationState | null = null;
 const animName = animFromQuery();
 const cycleParam = new URLSearchParams(window.location.search).get("cycle");
 const cycleMode = isTauri ? cycleParam !== "0" : cycleParam === "1";
+
+type PomoPhase = "idle" | "running" | "paused";
+let pomoPhase: PomoPhase = "idle";
+let pomoRemainingMs = 25 * 60 * 1000;
+let pomoDefaultDurationMs = 25 * 60 * 1000;
+let speechEndAt = 0;
+let speechAfter: (() => void) | null = null;
+let startIdleRef: (() => void) | null = null;
+
+function isSpeechLocked() {
+  return Date.now() < speechEndAt;
+}
+
+function pickLine(lines: string[]) {
+  return lines[(Math.random() * lines.length) | 0];
+}
+
+function formatMmSs(ms: number) {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return `${String(m).padStart(2, "0")}:${String(r).padStart(2, "0")}`;
+}
+
+function parseMmSsToMs(text: string): number | null {
+  const m = text.trim().match(/^(\d{1,3}):(\d{1,2})$/);
+  if (!m) return null;
+  const min = parseInt(m[1]!, 10);
+  const sec = parseInt(m[2]!, 10);
+  if (!Number.isFinite(min) || !Number.isFinite(sec)) return null;
+  if (sec < 0 || sec > 59) return null;
+  if (min < 1 || min > 180) return null;
+  return (min * 60 + sec) * 1000;
+}
+
+function syncIdlePomoFromInput() {
+  if (pomoPhase !== "idle" || isSpeechLocked()) return;
+  const ms = parseMmSsToMs(pomoTimeEl.value);
+  if (ms == null) {
+    pomoTimeEl.value = formatMmSs(pomoRemainingMs);
+    return;
+  }
+  pomoDefaultDurationMs = ms;
+  pomoRemainingMs = ms;
+  pomoTimeEl.value = formatMmSs(pomoRemainingMs);
+}
+
+function updatePomoTimeDisplay() {
+  pomoTimeEl.value = formatMmSs(pomoRemainingMs);
+  pomoTimeEl.readOnly = pomoPhase !== "idle" || isSpeechLocked();
+}
+
+function showSpeechBubble(text: string) {
+  speechBubbleEl.textContent = text;
+  speechBubbleEl.hidden = false;
+}
+
+function hideSpeechBubble() {
+  speechBubbleEl.textContent = "";
+  speechBubbleEl.hidden = true;
+}
+
+function beginSpeech(text: string, durationMs: number, after?: () => void) {
+  speechEndAt = Date.now() + durationMs;
+  speechAfter = after ?? null;
+  showSpeechBubble(text);
+  if (animState && skeleton?.data.findAnimation(TALK_ANIM)) {
+    animState.setAnimation(0, TALK_ANIM, true);
+  }
+}
 
 let ignoreCursorEnabled = false;
 let ignoreCursorPending: Promise<void> | null = null;
@@ -130,10 +308,16 @@ async function tauriPointerTick() {
 
   syncGazeFromClient(clientX, clientY);
 
+  const overPomo = isClientPointOverPomoPanel(clientX, clientY);
   const inside = hitTestAtClientPoint(sp, clientX, clientY);
-  canvas.style.cursor = inside ? "grab" : "default";
-  if (inside) setIgnoreCursorEventsSafe(false);
-  else setIgnoreCursorEventsSafe(true);
+  if (overPomo) {
+    canvas.style.cursor = "default";
+    setIgnoreCursorEventsSafe(false);
+  } else {
+    canvas.style.cursor = inside ? "grab" : "default";
+    if (inside) setIgnoreCursorEventsSafe(false);
+    else setIgnoreCursorEventsSafe(true);
+  }
 }
 
 function ensureTauriPointerLoop() {
@@ -175,6 +359,7 @@ function hitTestAtClientPoint(sp: SpineCanvas, clientX: number, clientY: number)
 
 window.addEventListener("pointerdown", (e) => {
   if (e.button !== 0) return;
+  if (isClientPointOverPomoPanel(e.clientX, e.clientY)) return;
   const sp = (window as any).__spineCanvas as SpineCanvas | undefined;
   if (!sp || !skeleton) return;
   if (hitTestAtClientPoint(sp, e.clientX, e.clientY)) {
@@ -189,6 +374,10 @@ if (!isTauri) {
   window.addEventListener("pointermove", (e) => {
     const sp = (window as any).__spineCanvas as SpineCanvas | undefined;
     if (!sp || !skeleton) return;
+    if (isClientPointOverPomoPanel(e.clientX, e.clientY)) {
+      canvas.style.cursor = "default";
+      return;
+    }
     const inside = hitTestAtClientPoint(sp, e.clientX, e.clientY);
     canvas.style.cursor = inside ? "grab" : "default";
   });
@@ -359,8 +548,43 @@ new SpineCanvas(canvas, {
         ensureTauriPointerLoop();
       }
 
+      startIdleRef = startIdle;
+      updatePomoTimeDisplay();
+      pomoTimeEl.addEventListener("change", () => syncIdlePomoFromInput());
+      pomoTimeEl.addEventListener("blur", () => syncIdlePomoFromInput());
+      document.querySelector("#pomo-start")!.addEventListener("click", () => {
+        if (pomoPhase !== "idle" || isSpeechLocked()) return;
+        const ms = parseMmSsToMs(pomoTimeEl.value) ?? pomoDefaultDurationMs;
+        pomoDefaultDurationMs = ms;
+        pomoRemainingMs = ms;
+        pomoPhase = "running";
+        updatePomoTimeDisplay();
+        beginSpeech(pickLine(POMO_START_LINES), 2800);
+      });
+      document.querySelector("#pomo-pause")!.addEventListener("click", () => {
+        if (pomoPhase !== "running" || isSpeechLocked()) return;
+        pomoPhase = "paused";
+        beginSpeech(POMO_PAUSE_LINE, 2200);
+      });
+      document.querySelector("#pomo-resume")!.addEventListener("click", () => {
+        if (pomoPhase !== "paused" || isSpeechLocked()) return;
+        pomoPhase = "running";
+        beginSpeech(POMO_RESUME_LINE, 2200);
+      });
+      document.querySelector("#pomo-reset")!.addEventListener("click", () => {
+        pomoPhase = "idle";
+        speechEndAt = 0;
+        hideSpeechBubble();
+        speechAfter = null;
+        pomoRemainingMs = pomoDefaultDurationMs;
+        updatePomoTimeDisplay();
+        if (cycleMode) startIdle();
+        else animState.setAnimation(0, animName, true);
+      });
+
       (sp as any).__cycleTick = (delta: number) => {
         if (!cycleMode || !animState) return;
+        if (isSpeechLocked()) return;
 
         if (phase === "idle") {
           idleHold -= delta;
@@ -379,8 +603,35 @@ new SpineCanvas(canvas, {
     },
     update(sp, delta) {
       if (!skeleton || !animState) return;
+
+      if (speechEndAt > 0 && Date.now() >= speechEndAt) {
+        speechEndAt = 0;
+        hideSpeechBubble();
+        const fn = speechAfter;
+        speechAfter = null;
+        fn?.();
+        if (cycleMode && startIdleRef) startIdleRef();
+        else animState.setAnimation(0, animName, true);
+      }
+
       const tick = (sp as any).__cycleTick as undefined | ((d: number) => void);
       tick?.(delta);
+
+      if (pomoPhase === "running" && !isSpeechLocked()) {
+        pomoRemainingMs -= delta * 1000;
+        updatePomoTimeDisplay();
+        if (pomoRemainingMs <= 0) {
+          pomoRemainingMs = 0;
+          pomoPhase = "idle";
+          updatePomoTimeDisplay();
+          const dur = 3000 + Math.random() * 3000;
+          beginSpeech(pickLine(POMO_END_LINES), dur, () => {
+            pomoRemainingMs = pomoDefaultDurationMs;
+            updatePomoTimeDisplay();
+          });
+        }
+      }
+
       animState.update(delta);
       animState.apply(skeleton);
 
@@ -429,7 +680,10 @@ new SpineCanvas(canvas, {
   },
 });
 
+setupPomoPanelDrag();
+
 window.addEventListener("resize", () => {
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
+  clampPomoPanelPosition();
 });

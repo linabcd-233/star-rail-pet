@@ -39,3 +39,105 @@ body {
   background: rgba(0, 0, 0, 0.35);
   display: none;
 }
+
+#pomo-panel {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  z-index: 10;
+  /* 叠在 Spine 画布（银枝）之上，整块区域可接收指针（Tauri 穿透由 main.ts 矩形命中配合） */
+  pointer-events: auto;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(20, 18, 28, 0.72);
+  color: #eee;
+  font: 12px/1.35 system-ui, sans-serif;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+  max-width: min(220px, 92vw);
+}
+
+.pomo-drag-handle {
+  cursor: grab;
+  height: 12px;
+  margin: -4px -6px 6px -6px;
+  border-radius: 6px;
+  background: rgba(255, 200, 210, 0.12);
+  touch-action: none;
+}
+
+.pomo-drag-handle:active {
+  cursor: grabbing;
+}
+
+.pomo-main-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+input.pomo-time {
+  width: 100%;
+  max-width: 7.5em;
+  margin: 0;
+  padding: 4px 6px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(0, 0, 0, 0.35);
+  color: inherit;
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  text-align: center;
+}
+
+input.pomo-time:read-only {
+  opacity: 0.95;
+  cursor: default;
+}
+
+.pomo-row {
+  margin-bottom: 4px;
+}
+
+.pomo-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+#pomo-panel button {
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 190, 200, 0.32);
+  background: rgba(130, 42, 58, 0.48);
+  color: rgba(255, 248, 248, 0.96);
+  font: inherit;
+  box-shadow: 0 1px 2px rgba(40, 10, 18, 0.35);
+}
+
+#pomo-panel button:hover {
+  background: rgba(155, 52, 72, 0.58);
+  border-color: rgba(255, 210, 218, 0.42);
+}
+
+#speech-bubble {
+  position: absolute;
+  left: 50%;
+  bottom: 120px;
+  transform: translateX(-50%);
+  z-index: 9;
+  max-width: min(320px, 88vw);
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: rgba(255, 250, 255, 0.94);
+  color: #1a1520;
+  font: 14px/1.45 system-ui, sans-serif;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  pointer-events: none;
+  text-align: center;
+}
+
+#speech-bubble[hidden] {
+  display: none !important;
+}
