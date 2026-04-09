@@ -8,7 +8,7 @@ import {
   SkeletonJson,
 } from "@esotericsoftware/spine-core";
 import { ResizeMode, SpineCanvas, Vector3 } from "@esotericsoftware/spine-webgl";
-import { cursorPosition, getCurrentWindow } from "@tauri-apps/api/window";
+import { cursorPosition, getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 
 const SKEL = "1302.1a88ff13.json";
 const ATLAS = "1302.atlas";
@@ -36,11 +36,12 @@ canvas.height = window.innerHeight;
 let skeleton: Skeleton | null = null;
 let animState: AnimationState | null = null;
 const animName = animFromQuery();
-const cycleMode = new URLSearchParams(window.location.search).get("cycle") === "1";
+const cycleParam = new URLSearchParams(window.location.search).get("cycle");
+const cycleMode = isTauri ? cycleParam !== "0" : cycleParam === "1";
 
 let ignoreCursorEnabled = false;
 let ignoreCursorPending: Promise<void> | null = null;
-let ignoreCursorPollTimer: number | null = null;
+let tauriPointerLoopTimer: number | null = null;
 
 type GazeState = {
   enabled: boolean;
@@ -81,26 +82,23 @@ function lerpExp(current: number, target: number, k: number, dt: number) {
   return current + (target - current) * t;
 }
 
-function canvasPointToPixels(e: MouseEvent) {
+/** 目光：唯一写入 gaze.mx/my/active 的入口（Tauri：`tauriPointerTick`；浏览器：`mousemove`）。 */
+function syncGazeFromClient(clientX: number, clientY: number) {
+  if (!gaze.enabled) return;
   const r = canvas.getBoundingClientRect();
-  const x = ((e.clientX - r.left) / r.width) * canvas.width;
-  const y = ((e.clientY - r.top) / r.height) * canvas.height;
-  return { x, y };
+  gaze.active = clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom;
+  if (!gaze.active) return;
+  const x = ((clientX - r.left) / r.width) * canvas.width;
+  const y = ((clientY - r.top) / r.height) * canvas.height;
+  gaze.mx = x;
+  gaze.my = y;
 }
 
-window.addEventListener("mousemove", (e) => {
-  if (!gaze.enabled) return;
-  const p = canvasPointToPixels(e);
-  gaze.mx = p.x;
-  gaze.my = p.y;
-
-  const r = canvas.getBoundingClientRect();
-  gaze.active =
-    e.clientX >= r.left &&
-    e.clientX <= r.right &&
-    e.clientY >= r.top &&
-    e.clientY <= r.bottom;
-});
+if (!isTauri) {
+  window.addEventListener("mousemove", (e) => {
+    syncGazeFromClient(e.clientX, e.clientY);
+  });
+}
 
 function setIgnoreCursorEventsSafe(ignore: boolean) {
   if (!isTauri) return;
@@ -116,9 +114,8 @@ function setIgnoreCursorEventsSafe(ignore: boolean) {
     });
 }
 
-async function pollCursorForDragRegionHit() {
+async function tauriPointerTick() {
   if (!isTauri) return;
-  if (!ignoreCursorEnabled) return;
   const sp = (window as any).__spineCanvas as SpineCanvas | undefined;
   if (!sp || !skeleton) return;
 
@@ -130,21 +127,24 @@ async function pollCursorForDragRegionHit() {
 
   const clientX = (cursor.x - innerPos.x) / scale;
   const clientY = (cursor.y - innerPos.y) / scale;
+
+  syncGazeFromClient(clientX, clientY);
+
   const inside = hitTestAtClientPoint(sp, clientX, clientY);
+  canvas.style.cursor = inside ? "grab" : "default";
   if (inside) setIgnoreCursorEventsSafe(false);
+  else setIgnoreCursorEventsSafe(true);
 }
 
-function ensureIgnoreCursorPoller() {
-  if (!isTauri) return;
-  if (ignoreCursorPollTimer != null) return;
-  ignoreCursorPollTimer = window.setInterval(() => {
-    void pollCursorForDragRegionHit();
+function ensureTauriPointerLoop() {
+  if (!isTauri || tauriPointerLoopTimer != null) return;
+  tauriPointerLoopTimer = window.setInterval(() => {
+    void tauriPointerTick();
   }, 33);
 }
 
 function enableBackgroundClickThrough() {
   setIgnoreCursorEventsSafe(true);
-  ensureIgnoreCursorPoller();
 }
 
 function disableBackgroundClickThrough() {
@@ -185,21 +185,26 @@ window.addEventListener("pointerdown", (e) => {
   }
 });
 
-window.addEventListener("pointermove", (e) => {
-  if (!isTauri) return;
-  const sp = (window as any).__spineCanvas as SpineCanvas | undefined;
-  if (!sp || !skeleton) return;
-  const inside = hitTestAtClientPoint(sp, e.clientX, e.clientY);
-  canvas.style.cursor = inside ? "grab" : "default";
-  if (inside) disableBackgroundClickThrough();
-  else enableBackgroundClickThrough();
-});
+if (!isTauri) {
+  window.addEventListener("pointermove", (e) => {
+    const sp = (window as any).__spineCanvas as SpineCanvas | undefined;
+    if (!sp || !skeleton) return;
+    const inside = hitTestAtClientPoint(sp, e.clientX, e.clientY);
+    canvas.style.cursor = inside ? "grab" : "default";
+  });
+}
 
 let stableMidX = 0;
 let stableMidY = 0;
 let stableBoundsW = 0;
 let stableBoundsH = 0;
 let userScale = 1;
+const WIN_BASE_W = 360;
+const WIN_BASE_H = 300;
+const WIN_MAX_W = 960;
+const WIN_MAX_H = 800;
+const SCALE_MAX = Math.min(WIN_MAX_W / WIN_BASE_W, WIN_MAX_H / WIN_BASE_H);
+let resizePending: number | null = null;
 
 function captureStableCameraFromSkeleton() {
   if (!skeleton) return;
@@ -220,7 +225,8 @@ function fitCamera(sp: SpineCanvas) {
   const zx = stableBoundsW > 0 ? (stableBoundsW * pad) / canvas.width : 1;
   const zy = stableBoundsH > 0 ? (stableBoundsH * pad) / canvas.height : 1;
   const baseZoom = Math.max(zx, zy, 1e-6);
-  cam.zoom = baseZoom / Math.max(1e-6, userScale);
+  const charScale = userScale <= 1 ? Math.max(1e-6, userScale) : 1;
+  cam.zoom = baseZoom / charScale;
   cam.update();
 }
 
@@ -233,10 +239,31 @@ window.addEventListener(
     if (!hitTestAtClientPoint(sp, e.clientX, e.clientY)) return;
     e.preventDefault();
     const step = Math.exp((-e.deltaY / 300) * 0.25);
-    userScale = clamp(userScale * step, 0.35, 3.5);
+    userScale = clamp(userScale * step, 0.35, SCALE_MAX);
+    if (isTauri) scheduleWindowResizeToScale();
   },
   { passive: false }
 );
+
+function scheduleWindowResizeToScale() {
+  if (!isTauri) return;
+  if (resizePending != null) window.clearTimeout(resizePending);
+  resizePending = window.setTimeout(() => {
+    resizePending = null;
+    void applyWindowResizeToScale();
+  }, 40);
+}
+
+async function applyWindowResizeToScale() {
+  const win = getCurrentWindow();
+  await win.setMinSize(new LogicalSize(WIN_BASE_W, WIN_BASE_H));
+  await win.setMaxSize(new LogicalSize(WIN_MAX_W, WIN_MAX_H));
+
+  const winScale = clamp(userScale, 1, SCALE_MAX);
+  const w = Math.round(clamp(WIN_BASE_W * winScale, WIN_BASE_W, WIN_MAX_W));
+  const h = Math.round(clamp(WIN_BASE_H * winScale, WIN_BASE_H, WIN_MAX_H));
+  await win.setSize(new LogicalSize(w, h));
+}
 
 new SpineCanvas(canvas, {
   pathPrefix: "/argenti/",
@@ -311,7 +338,9 @@ new SpineCanvas(canvas, {
 
       if (cycleMode) {
         startIdle();
-        statusEl.textContent = "桌宠轮播（单轨道）：idel 呼吸 + 定时表情（?cycle=1）";
+        statusEl.textContent = isTauri
+          ? "桌宠轮播：idel + 表情（Tauri 默认开启，?cycle=0 关闭）"
+          : "桌宠轮播：idel + 表情（?cycle=1 开启）";
       } else {
         if (!skelData.findAnimation(animName)) {
           const names = skelData.animations.map((a) => a.name).join(", ");
@@ -325,7 +354,10 @@ new SpineCanvas(canvas, {
       skeleton.updateWorldTransform(Physics.update);
       captureStableCameraFromSkeleton();
       fitCamera(sp);
-      if (isTauri) enableBackgroundClickThrough();
+      if (isTauri) {
+        enableBackgroundClickThrough();
+        ensureTauriPointerLoop();
+      }
 
       (sp as any).__cycleTick = (delta: number) => {
         if (!cycleMode || !animState) return;

@@ -6,10 +6,12 @@
   "scripts": {
     "sync-assets": "node scripts/sync-assets.mjs",
     "dev": "npm run sync-assets && vite",
+    "dev:strict": "npm run sync-assets && vite --port 5173 --strictPort",
     "build": "npm run sync-assets && tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "npm run sync-assets && tauri dev",
+    "tauri:dev:strict": "tauri dev",
     "tauri:build": "npm run sync-assets && tauri build"
   },
   "devDependencies": {
