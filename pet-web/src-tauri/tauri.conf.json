@@ -13,12 +13,13 @@
     "windows": [
       {
         "label": "main",
-        "title": "Spine 银枝 (Tauri)",
-        "width": 960,
-        "height": 800,
-        "resizable": true,
+        "title": "银枝",
+        "width": 480,
+        "height": 400,
+        "resizable": false,
         "fullscreen": false,
         "decorations": false,
+        "shadow": false,
         "transparent": true,
         "alwaysOnTop": true
       }

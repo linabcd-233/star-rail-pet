@@ -24,20 +24,6 @@ body {
   z-index: 1;
 }
 
-#drag-region {
-  position: absolute;
-  left: 0;
-  top: 0;
-  width: 0;
-  height: 0;
-  /* 透明覆盖层：只在角色范围处存在，用于 Tauri 原生拖拽 */
-  background: transparent;
-  cursor: grab;
-  z-index: 3;
-  pointer-events: auto;
-  box-sizing: border-box;
-}
-
 #status {
   position: absolute;
   left: 8px;
@@ -51,4 +37,5 @@ body {
   padding: 4px 6px;
   border-radius: 6px;
   background: rgba(0, 0, 0, 0.35);
+  display: none;
 }

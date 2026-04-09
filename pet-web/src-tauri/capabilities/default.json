@@ -5,7 +5,9 @@
   "remote": {
     "urls": [
       "http://localhost:5173/*",
-      "http://127.0.0.1:5173/*"
+      "http://127.0.0.1:5173/*",
+      "http://localhost:5174/*",
+      "http://127.0.0.1:5174/*"
     ]
   },
   "windows": [
@@ -13,6 +15,7 @@
   ],
   "permissions": [
     "core:default",
-    "core:window:allow-start-dragging"
+    "core:window:allow-start-dragging",
+    "core:window:allow-set-ignore-cursor-events"
   ]
 }

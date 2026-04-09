@@ -8,7 +8,7 @@ import {
   SkeletonJson,
 } from "@esotericsoftware/spine-core";
 import { ResizeMode, SpineCanvas, Vector3 } from "@esotericsoftware/spine-webgl";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { cursorPosition, getCurrentWindow } from "@tauri-apps/api/window";
 
 const SKEL = "1302.1a88ff13.json";
 const ATLAS = "1302.atlas";
@@ -22,11 +22,9 @@ function animFromQuery(): string {
 const root = document.querySelector<HTMLDivElement>("#app")!;
 root.innerHTML = `
   <canvas id="skeleton" tabindex="-1"></canvas>
-  <div id="drag-region" aria-hidden="true"></div>
   <p id="status">加载中…</p>
 `;
 const canvas = document.querySelector<HTMLCanvasElement>("#skeleton")!;
-const dragRegion = document.querySelector<HTMLDivElement>("#drag-region")!;
 const statusEl = document.querySelector<HTMLParagraphElement>("#status")!;
 const isTauri =
   !!(window as any).__TAURI_INTERNALS__ ||
@@ -39,6 +37,10 @@ let skeleton: Skeleton | null = null;
 let animState: AnimationState | null = null;
 const animName = animFromQuery();
 const cycleMode = new URLSearchParams(window.location.search).get("cycle") === "1";
+
+let ignoreCursorEnabled = false;
+let ignoreCursorPending: Promise<void> | null = null;
+let ignoreCursorPollTimer: number | null = null;
 
 type GazeState = {
   enabled: boolean;
@@ -100,51 +102,98 @@ window.addEventListener("mousemove", (e) => {
     e.clientY <= r.bottom;
 });
 
+function setIgnoreCursorEventsSafe(ignore: boolean) {
+  if (!isTauri) return;
+  if (ignoreCursorEnabled === ignore) return;
+  if (ignoreCursorPending) return;
+
+  ignoreCursorEnabled = ignore;
+  ignoreCursorPending = getCurrentWindow()
+    .setIgnoreCursorEvents(ignore)
+    .catch(() => {})
+    .finally(() => {
+      ignoreCursorPending = null;
+    });
+}
+
+async function pollCursorForDragRegionHit() {
+  if (!isTauri) return;
+  if (!ignoreCursorEnabled) return;
+  const sp = (window as any).__spineCanvas as SpineCanvas | undefined;
+  if (!sp || !skeleton) return;
+
+  const [cursor, innerPos, scale] = await Promise.all([
+    cursorPosition(),
+    getCurrentWindow().innerPosition(),
+    getCurrentWindow().scaleFactor(),
+  ]);
+
+  const clientX = (cursor.x - innerPos.x) / scale;
+  const clientY = (cursor.y - innerPos.y) / scale;
+  const inside = hitTestAtClientPoint(sp, clientX, clientY);
+  if (inside) setIgnoreCursorEventsSafe(false);
+}
+
+function ensureIgnoreCursorPoller() {
+  if (!isTauri) return;
+  if (ignoreCursorPollTimer != null) return;
+  ignoreCursorPollTimer = window.setInterval(() => {
+    void pollCursorForDragRegionHit();
+  }, 33);
+}
+
+function enableBackgroundClickThrough() {
+  setIgnoreCursorEventsSafe(true);
+  ensureIgnoreCursorPoller();
+}
+
+function disableBackgroundClickThrough() {
+  setIgnoreCursorEventsSafe(false);
+}
+
+function clientPointToCanvasPixels(clientX: number, clientY: number) {
+  const r = canvas.getBoundingClientRect();
+  const x = ((clientX - r.left) / r.width) * canvas.width;
+  const y = ((clientY - r.top) / r.height) * canvas.height;
+  return { x, y };
+}
+
+function hitTestAtClientPoint(sp: SpineCanvas, clientX: number, clientY: number) {
+  if (!skeleton) return false;
+  const r = canvas.getBoundingClientRect();
+  if (clientX < r.left || clientX > r.right || clientY < r.top || clientY > r.bottom) return false;
+
+  const p = clientPointToCanvasPixels(clientX, clientY);
+  const ix = Math.max(0, Math.min(canvas.width - 1, (p.x | 0)));
+  const iy = Math.max(0, Math.min(canvas.height - 1, (p.y | 0)));
+
+  const gl = sp.gl;
+  const px = new Uint8Array(4);
+  gl.readPixels(ix, canvas.height - 1 - iy, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+  return px[3] > 8;
+}
+
 window.addEventListener("pointerdown", (e) => {
   if (e.button !== 0) return;
   const sp = (window as any).__spineCanvas as SpineCanvas | undefined;
   if (!sp || !skeleton) return;
-  const dr = dragRegion.getBoundingClientRect();
-  if (e.clientX >= dr.left && e.clientX <= dr.right && e.clientY >= dr.top && e.clientY <= dr.bottom) {
+  if (hitTestAtClientPoint(sp, e.clientX, e.clientY)) {
     e.preventDefault();
     if (!isTauri) return;
+    disableBackgroundClickThrough();
     void getCurrentWindow().startDragging();
   }
 });
 
-function updateDragRegionToSkeletonBounds(sp: SpineCanvas) {
-  if (!skeleton) {
-    dragRegion.style.width = "0px";
-    dragRegion.style.height = "0px";
-    return;
-  }
-  const b = skeleton.getBoundsRect();
-  const cam = sp.renderer.camera;
-  const p1 = cam.worldToScreen(new Vector3(b.x, b.y, 0), canvas.width, canvas.height);
-  const p2 = cam.worldToScreen(new Vector3(b.x + b.width, b.y + b.height, 0), canvas.width, canvas.height);
-  const left = Math.min(p1.x, p2.x);
-  const right = Math.max(p1.x, p2.x);
-  const bottom = Math.min(p1.y, p2.y);
-  const top = Math.max(p1.y, p2.y);
-  const pad = 8;
-
-  const appRect = root.getBoundingClientRect();
-  const canvasRect = canvas.getBoundingClientRect();
-  const scaleX = canvasRect.width / canvas.width;
-  const scaleY = canvasRect.height / canvas.height;
-  const canvasOffsetX = canvasRect.left - appRect.left;
-  const canvasOffsetY = canvasRect.top - appRect.top;
-
-  const width = (Math.max(0, right - left) + pad * 2) * scaleX;
-  const height = (Math.max(0, top - bottom) + pad * 2) * scaleY;
-  const cssLeft = (left - pad) * scaleX + canvasOffsetX;
-  const cssTop = (canvas.height - top - pad) * scaleY + canvasOffsetY;
-
-  dragRegion.style.left = `${cssLeft}px`;
-  dragRegion.style.top = `${cssTop}px`;
-  dragRegion.style.width = `${width}px`;
-  dragRegion.style.height = `${height}px`;
-}
+window.addEventListener("pointermove", (e) => {
+  if (!isTauri) return;
+  const sp = (window as any).__spineCanvas as SpineCanvas | undefined;
+  if (!sp || !skeleton) return;
+  const inside = hitTestAtClientPoint(sp, e.clientX, e.clientY);
+  canvas.style.cursor = inside ? "grab" : "default";
+  if (inside) disableBackgroundClickThrough();
+  else enableBackgroundClickThrough();
+});
 
 let stableMidX = 0;
 let stableMidY = 0;
@@ -175,6 +224,9 @@ function fitCamera(sp: SpineCanvas) {
 
 new SpineCanvas(canvas, {
   pathPrefix: "/argenti/",
+  webglConfig: {
+    preserveDrawingBuffer: true,
+  },
   app: {
     loadAssets(sp) {
       sp.assetManager.loadTextureAtlas(ATLAS);
@@ -257,6 +309,7 @@ new SpineCanvas(canvas, {
       skeleton.updateWorldTransform(Physics.update);
       captureStableCameraFromSkeleton();
       fitCamera(sp);
+      if (isTauri) enableBackgroundClickThrough();
 
       (sp as any).__cycleTick = (delta: number) => {
         if (!cycleMode || !animState) return;
@@ -318,7 +371,6 @@ new SpineCanvas(canvas, {
       if (!skeleton) return;
       sp.renderer.resize(ResizeMode.Expand);
       fitCamera(sp);
-      updateDragRegionToSkeletonBounds(sp);
       sp.renderer.begin();
       sp.renderer.drawSkeleton(skeleton, false);
       sp.renderer.end();
