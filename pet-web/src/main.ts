@@ -199,6 +199,7 @@ let stableMidX = 0;
 let stableMidY = 0;
 let stableBoundsW = 0;
 let stableBoundsH = 0;
+let userScale = 1;
 
 function captureStableCameraFromSkeleton() {
   if (!skeleton) return;
@@ -218,9 +219,24 @@ function fitCamera(sp: SpineCanvas) {
   cam.position.y = stableMidY;
   const zx = stableBoundsW > 0 ? (stableBoundsW * pad) / canvas.width : 1;
   const zy = stableBoundsH > 0 ? (stableBoundsH * pad) / canvas.height : 1;
-  cam.zoom = Math.max(zx, zy, 1e-6);
+  const baseZoom = Math.max(zx, zy, 1e-6);
+  cam.zoom = baseZoom / Math.max(1e-6, userScale);
   cam.update();
 }
+
+window.addEventListener(
+  "wheel",
+  (e) => {
+    const sp = (window as any).__spineCanvas as SpineCanvas | undefined;
+    if (!sp || !skeleton) return;
+    if (!e.ctrlKey) return;
+    if (!hitTestAtClientPoint(sp, e.clientX, e.clientY)) return;
+    e.preventDefault();
+    const step = Math.exp((-e.deltaY / 300) * 0.25);
+    userScale = clamp(userScale * step, 0.35, 3.5);
+  },
+  { passive: false }
+);
 
 new SpineCanvas(canvas, {
   pathPrefix: "/argenti/",
