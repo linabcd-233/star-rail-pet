@@ -11,7 +11,7 @@ import {
   Skeleton,
   SkeletonJson,
 } from "@esotericsoftware/spine-core";
-import { ResizeMode, SpineCanvas } from "@esotericsoftware/spine-webgl";
+import { ResizeMode, SpineCanvas, Vector3 } from "@esotericsoftware/spine-webgl";
 
 const SKEL = "1302.1a88ff13.json";
 const ATLAS = "1302.atlas";
@@ -34,6 +34,72 @@ let skeleton: Skeleton | null = null;
 let animState: AnimationState | null = null;
 const animName = animFromQuery();
 const cycleMode = new URLSearchParams(window.location.search).get("cycle") === "1";
+
+// ---- 鼠标“目光跟随”（程序驱动，不依赖素材里有专门动画）----
+type GazeState = {
+  enabled: boolean;
+  // 鼠标是否在 canvas 内
+  active: boolean;
+  // 鼠标在 canvas 的像素坐标（与 canvas.width/height 同尺度）
+  mx: number;
+  my: number;
+  // 平滑后的偏移（度）
+  yawDeg: number;
+  pitchDeg: number;
+  // 上一帧已经应用到骨骼上的偏移（用于“抵消累计”）
+  appliedYawDeg: number;
+  appliedYOffset: number;
+  // 目标骨骼（找不到就禁用）
+  boneName: string;
+  maxYawDeg: number;
+  maxPitchDeg: number;
+  followK: number; // 越大越“跟手”
+};
+
+const gaze: GazeState = {
+  enabled: new URLSearchParams(window.location.search).get("gaze") !== "0",
+  active: false,
+  mx: 0,
+  my: 0,
+  yawDeg: 0,
+  pitchDeg: 0,
+  appliedYawDeg: 0,
+  appliedYOffset: 0,
+  boneName: "左看右看",
+  // 先用非常小的幅度，避免“扭头过猛”
+  maxYawDeg: 5,
+  maxPitchDeg: 2,
+  followK: 10,
+};
+
+function clamp(x: number, a: number, b: number) {
+  return Math.min(b, Math.max(a, x));
+}
+
+function lerpExp(current: number, target: number, k: number, dt: number) {
+  // 指数平滑：dt 越大越快靠近 target
+  const t = 1 - Math.exp(-k * dt);
+  return current + (target - current) * t;
+}
+
+function canvasPointToPixels(e: MouseEvent) {
+  const r = canvas.getBoundingClientRect();
+  // canvas.width/height 本身就是像素（我们设置为 innerWidth/innerHeight）
+  const x = ((e.clientX - r.left) / r.width) * canvas.width;
+  const y = ((e.clientY - r.top) / r.height) * canvas.height;
+  return { x, y };
+}
+
+canvas.addEventListener("mousemove", (e) => {
+  if (!gaze.enabled) return;
+  const p = canvasPointToPixels(e);
+  gaze.mx = p.x;
+  gaze.my = p.y;
+  gaze.active = true;
+});
+canvas.addEventListener("mouseleave", () => {
+  gaze.active = false;
+});
 
 /** 与 Python 版一致：用初始姿势的包围盒定机位，不在每帧跟 getBoundsRect() 漂移。 */
 let stableMidX = 0;
@@ -122,7 +188,8 @@ new SpineCanvas(canvas, {
         animState.setAnimation(0, IDLE_ANIM, true);
         phase = "idle";
         pendingEmoji = null;
-        idleHold = randRange(8, 14);
+        // 为了观察效果先缩短间隔，稳定后再调回更自然的长间隔
+        idleHold = randRange(3, 5);
       }
 
       function startEmoji(e: EmojiName) {
@@ -175,6 +242,45 @@ new SpineCanvas(canvas, {
       tick?.(delta);
       animState.update(delta);
       animState.apply(skeleton);
+
+      // 目光跟随：在动画应用后，叠加一个很小的“看向鼠标”偏移，再更新世界矩阵。
+      if (gaze.enabled) {
+        const b = skeleton.findBone(gaze.boneName);
+        if (b) {
+          // 每帧先撤销上一帧已叠加的偏移，避免在“动画切换/骨骼基准变化”时产生残留叠加。
+          b.rotation -= gaze.appliedYawDeg;
+          b.y -= gaze.appliedYOffset;
+
+          // 屏幕 -> 世界坐标：用相机把鼠标像素坐标反投影到世界
+          const cam = sp.renderer.camera;
+          const mouseWorld = cam.screenToWorld(new Vector3(gaze.mx, gaze.my, 0), canvas.width, canvas.height);
+
+          // 以该骨骼的当前世界位置为参考，算一个目标方向（只取很小角度）
+          const dx = mouseWorld.x - b.worldX;
+          const dy = mouseWorld.y - b.worldY;
+
+          // “最容易做”的版本：把方向映射为 yaw/pitch 偏移角（度），再平滑。
+          // 这里的系数会受角色坐标系影响，需要你肉眼调一下 maxYaw/maxPitch。
+          // 方向约定：鼠标在哪边，就往哪边“看”（跟随而不是疏离）。
+          // 由于骨骼初始朝向/父子链旋转可能让屏幕观感与数学正方向相反，这里先统一翻转。
+          const targetYaw = clamp((-dx / 260) * gaze.maxYawDeg, -gaze.maxYawDeg, gaze.maxYawDeg);
+          const targetPitch = clamp((-dy / 420) * gaze.maxPitchDeg, -gaze.maxPitchDeg, gaze.maxPitchDeg);
+
+          const wantYaw = gaze.active ? targetYaw : 0;
+          const wantPitch = gaze.active ? targetPitch : 0;
+          gaze.yawDeg = lerpExp(gaze.yawDeg, wantYaw, gaze.followK, delta);
+          gaze.pitchDeg = lerpExp(gaze.pitchDeg, wantPitch, gaze.followK, delta);
+
+          // 关键修正：不能每帧 += 累加。这里用“本帧目标偏移 - 上帧已应用偏移”的增量方式叠加。
+          // 注意：Spine 2D rotation 是绕 Z 轴（屏幕内旋转）。我们只加很小的偏移。
+          const wantYOffset = gaze.pitchDeg * 0.6;
+          b.rotation += gaze.yawDeg;
+          b.y += wantYOffset;
+          gaze.appliedYawDeg = gaze.yawDeg;
+          gaze.appliedYOffset = wantYOffset;
+        }
+      }
+
       skeleton.updateWorldTransform(Physics.update);
     },
     render(sp) {
