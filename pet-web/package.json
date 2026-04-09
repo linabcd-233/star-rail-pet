@@ -1,0 +1,24 @@
+{
+  "name": "pet-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "sync-assets": "node scripts/sync-assets.mjs",
+    "dev": "npm run sync-assets && vite",
+    "build": "npm run sync-assets && tsc && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "tauri:dev": "npm run sync-assets && tauri dev",
+    "tauri:build": "npm run sync-assets && tauri build"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.10.1",
+    "typescript": "~6.0.2",
+    "vite": "^8.0.4"
+  },
+  "dependencies": {
+    "@esotericsoftware/spine-core": "4.2",
+    "@esotericsoftware/spine-webgl": "4.2"
+  }
+}

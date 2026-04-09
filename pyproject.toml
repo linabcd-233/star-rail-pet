@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "star-rail-pet"
+version = "0.1.0"
+description = "Spine 精简预览与桌面宠物（实验）"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "pygame>=2.5",
+    "PyOpenGL",
+    "PyOpenGL-accelerate",
+    "numpy",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[project.scripts]
+preview-spine = "star_rail_pet.preview_entry:main"
