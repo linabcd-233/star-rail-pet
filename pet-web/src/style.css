@@ -44,9 +44,8 @@ body {
   /* 由 main.ts syncPomoPanelWidthFromButtons 写入，与三按钮行同宽 */
   --pomo-btn-row-px: 0px;
   position: absolute;
-  left: 0;
-  top: 0;
-  bottom: auto;
+  left: 10%;
+  bottom: 0;
   z-index: 10;
   /* 叠在 Spine 画布（银枝）之上，整块区域可接收指针（Tauri 穿透由 main.ts 矩形命中配合） */
   pointer-events: auto;
@@ -61,6 +60,10 @@ body {
   color: #eee;
   font: 12px/1.35 system-ui, sans-serif;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+}
+
+#pomo-panel[hidden] {
+  display: none !important;
 }
 
 .pomo-drag-handle {
@@ -147,6 +150,41 @@ input.pomo-time:read-only {
 #pomo-panel button:disabled:hover {
   background: rgba(130, 42, 58, 0.48);
   border-color: rgba(255, 190, 200, 0.32);
+}
+
+.character-context-menu {
+  position: absolute;
+  z-index: 20;
+  min-width: 9em;
+  padding: 4px 0;
+  border-radius: 8px;
+  background: rgba(28, 24, 36, 0.96);
+  color: #f0eef5;
+  font: 13px/1.35 system-ui, sans-serif;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  pointer-events: auto;
+}
+
+.character-context-menu[hidden] {
+  display: none !important;
+}
+
+.character-context-menu-item {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 8px 14px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.character-context-menu-item:hover {
+  background: rgba(255, 200, 210, 0.14);
 }
 
 #speech-bubble {

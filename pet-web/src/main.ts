@@ -48,6 +48,9 @@ root.innerHTML = `
     </div>
   </div>
   <div id="speech-bubble" aria-live="polite" hidden></div>
+  <div id="character-context-menu" class="character-context-menu" hidden role="menu" aria-label="角色菜单">
+    <button type="button" class="character-context-menu-item" role="menuitem" data-action="toggle-pomo">关闭计时器</button>
+  </div>
   <p id="status">加载中…</p>
 `;
 const canvas = document.querySelector<HTMLCanvasElement>("#skeleton")!;
@@ -55,6 +58,7 @@ const statusEl = document.querySelector<HTMLParagraphElement>("#status")!;
 const pomoPanel = document.querySelector<HTMLDivElement>("#pomo-panel")!;
 const pomoTimeEl = document.querySelector<HTMLInputElement>("#pomo-time")!;
 const speechBubbleEl = document.querySelector<HTMLDivElement>("#speech-bubble")!;
+const characterContextMenuEl = document.querySelector<HTMLDivElement>("#character-context-menu")!;
 const POMO_PANEL_MARGIN = 0;
 
 /** 头部附近骨骼（优先更靠上的「身体4」），用于对话气泡锚在脸侧 */
@@ -90,6 +94,12 @@ function clampPomoPanelPosition() {
 function isClientPointOverPomoPanel(clientX: number, clientY: number) {
   const pr = pomoPanel.getBoundingClientRect();
   return clientX >= pr.left && clientX <= pr.right && clientY >= pr.top && clientY <= pr.bottom;
+}
+
+function isClientPointOverCharacterContextMenu(clientX: number, clientY: number) {
+  if (characterContextMenuEl.hidden) return false;
+  const r = characterContextMenuEl.getBoundingClientRect();
+  return clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom;
 }
 
 /** 第一行时间与面板宽度按三按钮行总宽收缩（CSS 单独做不到「子项定父宽」）。 */
@@ -416,8 +426,9 @@ async function tauriPointerTick() {
   syncGazeFromClient(clientX, clientY);
 
   const overPomo = isClientPointOverPomoPanel(clientX, clientY);
+  const overCharMenu = isClientPointOverCharacterContextMenu(clientX, clientY);
   const inside = hitTestAtClientPoint(sp, clientX, clientY);
-  if (overPomo) {
+  if (overPomo || overCharMenu) {
     canvas.style.cursor = "default";
     setIgnoreCursorEventsSafe(false);
   } else {
@@ -464,9 +475,77 @@ function hitTestAtClientPoint(sp: SpineCanvas, clientX: number, clientY: number)
   return px[3] > 8;
 }
 
+function hideCharacterContextMenu() {
+  characterContextMenuEl.hidden = true;
+  if (isTauri) void tauriPointerTick();
+}
+
+function updateCharacterContextMenuLabel() {
+  const btn = characterContextMenuEl.querySelector<HTMLButtonElement>("[data-action='toggle-pomo']");
+  if (btn) btn.textContent = pomoPanel.hidden ? "打开计时器" : "关闭计时器";
+}
+
+function showCharacterContextMenu(clientX: number, clientY: number) {
+  updateCharacterContextMenuLabel();
+  characterContextMenuEl.hidden = false;
+  const rr = root.getBoundingClientRect();
+  let left = clientX - rr.left;
+  let top = clientY - rr.top;
+  characterContextMenuEl.style.left = `${left}px`;
+  characterContextMenuEl.style.top = `${top}px`;
+  const mw = characterContextMenuEl.offsetWidth;
+  const mh = characterContextMenuEl.offsetHeight;
+  left = clamp(left, 0, Math.max(0, rr.width - mw));
+  top = clamp(top, 0, Math.max(0, rr.height - mh));
+  characterContextMenuEl.style.left = `${left}px`;
+  characterContextMenuEl.style.top = `${top}px`;
+  if (isTauri) disableBackgroundClickThrough();
+}
+
+function setupCharacterContextMenu() {
+  canvas.addEventListener("contextmenu", (e) => {
+    const sp = (window as any).__spineCanvas as SpineCanvas | undefined;
+    if (!sp || !skeleton) return;
+    e.preventDefault();
+    if (!hitTestAtClientPoint(sp, e.clientX, e.clientY)) return;
+    showCharacterContextMenu(e.clientX, e.clientY);
+  });
+
+  characterContextMenuEl.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    const t = (e.target as HTMLElement).closest("[data-action='toggle-pomo']");
+    if (!t) return;
+    e.preventDefault();
+    e.stopPropagation();
+    pomoPanel.hidden = !pomoPanel.hidden;
+    if (!pomoPanel.hidden) {
+      requestAnimationFrame(() => syncPomoPanelWidthFromButtons());
+    }
+    hideCharacterContextMenu();
+  });
+
+  document.addEventListener(
+    "pointerdown",
+    (e) => {
+      if (characterContextMenuEl.hidden) return;
+      if (characterContextMenuEl.contains(e.target as Node)) return;
+      hideCharacterContextMenu();
+    },
+    true
+  );
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !characterContextMenuEl.hidden) {
+      e.preventDefault();
+      hideCharacterContextMenu();
+    }
+  });
+}
+
 window.addEventListener("pointerdown", (e) => {
   if (e.button !== 0) return;
   if (isClientPointOverPomoPanel(e.clientX, e.clientY)) return;
+  if (isClientPointOverCharacterContextMenu(e.clientX, e.clientY)) return;
   const sp = (window as any).__spineCanvas as SpineCanvas | undefined;
   if (!sp || !skeleton) return;
   if (hitTestAtClientPoint(sp, e.clientX, e.clientY)) {
@@ -733,6 +812,10 @@ new SpineCanvas(canvas, {
         if (pomoRemainingMs <= 0) {
           pomoRemainingMs = 0;
           pomoPhase = "idle";
+          if (pomoPanel.hidden) {
+            pomoPanel.hidden = false;
+            requestAnimationFrame(() => syncPomoPanelWidthFromButtons());
+          }
           updatePomoTimeDisplay();
           const dur = 3000 + Math.random() * 3000;
           beginSpeech(pickLine(POMO_END_LINES), dur, () => {
@@ -793,6 +876,7 @@ new SpineCanvas(canvas, {
 });
 
 setupPomoPanelDrag();
+setupCharacterContextMenu();
 requestAnimationFrame(() => {
   syncPomoPanelWidthFromButtons();
   requestAnimationFrame(() => syncPomoPanelWidthFromButtons());
