@@ -1,6 +1,9 @@
-# 银枝桌宠项目 — 新手导读
+# Python 导读（网格预览线）
 
-面向：**会一点 Python 基础**（变量、函数、`import`），但**没用过 Spine**、也想搞懂「这个仓库在干什么」的读者。  
+> **若你的目标是跑桌宠、改 `pet-web` 功能**：请优先阅读 [`Tauri端导读.md`](Tauri端导读.md)，**可跳过本文**。  
+> 本文只讲 **Python 自研网格预览线**（`src/star_rail_pet/`）。该线**当前已搁置维护**（不接新功能），仍可用于理解「如何用 Python 读 Spine 导出并画 mesh」。
+
+面向：**只有一点 Python 基础**、**没系统学过 Spine**，但需要搞懂「这条 Python 线在干什么」的读者——包括**以 AI 协助为主、自己跟读代码**的开发方式。  
 本文用日常语言说明**思路**；具体参数仍以代码为准。
 
 ---
@@ -111,8 +114,8 @@ flowchart TD
 
 ### 6.1 目录与职责（和「从哪读起」）
 
-| 路径 | 适合新手怎么读 |
-|------|----------------|
+| 路径 | 建议怎么读 |
+|------|------------|
 | `src/star_rail_pet/preview_entry.py` | **入口**：参数、默认资源路径。第一遍通读。 |
 | `src/star_rail_pet/render/gl_preview.py` | **窗口与主循环**：何时加载、何时每帧重算。第二遍。 |
 | `src/star_rail_pet/spine/mesh_scene.py` | **读 JSON、建网格列表**：`load_spine_mesh_scene`。想懂数据从哪来，读这里。 |
@@ -126,15 +129,15 @@ flowchart TD
 
 ```
 main()
-  └─ run_gl_preview()
-        ├─ load_spine_mesh_scene()     # 启动时一次
-        └─ 循环每一帧:
-              pose_draws()
-                ├─ apply_animation_to_bones()   # 若有 --anim
-                └─ mesh_draws_for_bones()
-                      ├─ compute_bone_worlds()
-                      ├─ apply_transform_constraints_translate_world()
-                      └─ mesh_world_vertices() + region_uv_to_gl_texcoord()
+  run_gl_preview()
+    load_spine_mesh_scene()           # 启动时一次
+    每帧:
+      pose_draws()
+        apply_animation_to_bones()    # 若有 --anim
+        mesh_draws_for_bones()
+          compute_bone_worlds()
+          apply_transform_constraints_translate_world()
+          mesh_world_vertices() + region_uv_to_gl_texcoord()
 ```
 
 你在 `gl_preview.py` 里搜 `pose_draws` 或 `mesh_draws_for_bones`，就能顺着点进上面这条链。

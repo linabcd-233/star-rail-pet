@@ -3,6 +3,8 @@
 本文只讲 **`pet-web/` 子项目**：桌面壳（Tauri）+ 网页技术（Vite + TypeScript）+ **Spine 官方 WebGL 运行时**。  
 **不讲** 仓库根目录的 **Python**（`src/star_rail_pet/`、`tools/preview_spine_character.py` 等）。两边共用 **`assets/argenti`** 资源，但**代码与运行时完全独立**。
 
+> **当前仓库重心**：**桌宠与功能开发以本文所述 Tauri 线为准**。**Python 线已搁置维护**（不接新功能），仅作可选预览与对照；详见根目录 [`README.md`](../README.md)。
+
 ---
 
 ## 1. 先分清：Python 线 vs Tauri 线
@@ -15,7 +17,7 @@
 | 能力 | 文档已写明：未实现 slot/IK/变形等大量特性 | 接近编辑器导出语义，适合流汗、说话、mesh 形变等 |
 | 资源 | 直接读 `assets/argenti` | 构建前复制到 `public/argenti`，浏览器/WebView 用 URL 加载 |
 
-记住：**想「和 Spine 编辑器里一样完整」→ 看 Tauri 这条；想理解自研算法/轻量预览 → 看 Python 文档如 `新手导读.md`。**
+记住：**想「和 Spine 编辑器里一样完整」、做桌宠功能 → 以 Tauri 这条为主**；想理解自研 mesh 管线（搁置中）→ 可看 [`Python导读.md`](Python导读.md)。
 
 ---
 
